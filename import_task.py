@@ -95,7 +95,7 @@ def run_import():
             cursor.executemany(sql_insert, batch_data)
             conn.commit()
             batch_data = []
-            print(f"   -> Đã import {count}/{total_words} từ...")
+            print(f"   -> Imported {count}/{total_words} words...")
 
     if batch_data:
         cursor.executemany(sql_insert, batch_data)

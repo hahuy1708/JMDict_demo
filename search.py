@@ -1,25 +1,32 @@
 # search.py
 import json
+import re
 from db_config import get_connection
 
 def perform_search(keyword):
     conn = get_connection()
     cursor = conn.cursor()
 
-    print(f"\n🔍 Đang tra cứu: '{keyword}'...")
+    print(f"\n🔍 Searching: '{keyword}'...")
 
     # Search priority:
     # 1) Exact headword / reading
     # 2) Prefix headword / reading
-    # 3) Full-text (English gloss_text) then LIKE fallback
+    # 3) Exact English word in gloss_text (word boundary)
+    # 4) Full-text (English gloss_text)
+    # 5) LIKE fallback
     sql_search = """
         SELECT raw_json, headword, reading, is_common,
                (headword = %s) AS exact_hw,
                (reading = %s) AS exact_rd,
                (headword LIKE %s) AS prefix_hw,
                (reading LIKE %s) AS prefix_rd,
+               (LOWER(gloss_text) REGEXP CONCAT('(^|[^0-9a-z])', %s, '([^0-9a-z]|$)')) AS exact_gloss_word,
+               (LOWER(gloss_text) LIKE CONCAT(%s, '%')) AS prefix_gloss,
                (gloss_text LIKE %s) AS like_gloss,
-               MATCH(gloss_text) AGAINST (%s IN NATURAL LANGUAGE MODE) AS ft_score
+               MATCH(gloss_text) AGAINST (%s IN NATURAL LANGUAGE MODE) AS ft_score,
+               CHAR_LENGTH(headword) AS hw_len,
+               CHAR_LENGTH(reading) AS rd_len
         FROM dictionary
         WHERE headword = %s
            OR reading = %s
@@ -32,18 +39,31 @@ def perform_search(keyword):
                  prefix_hw DESC,
                  prefix_rd DESC,
                  is_common DESC,
+                 exact_gloss_word DESC,
+                 prefix_gloss DESC,
                  ft_score DESC,
-                 like_gloss DESC
+                 like_gloss DESC,
+                 hw_len ASC,
+                 rd_len ASC,
+                 headword ASC,
+                 reading ASC
         LIMIT 10;
     """
 
     prefix = f"{keyword}%"
     like = f"%{keyword}%"
+
+    # For regex ranking in English gloss: treat keyword as a literal string.
+    # (If the user types characters like '.', '+', '?', etc. we don't want them to act as regex operators.)
+    keyword_lower = str(keyword).lower()
+    regex_literal = re.escape(keyword_lower)
     params = (
         keyword,
         keyword,
         prefix,
         prefix,
+        regex_literal,
+        keyword_lower,
         like,
         keyword,
         keyword,
